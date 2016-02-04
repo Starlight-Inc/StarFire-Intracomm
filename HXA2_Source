@@ -1,0 +1,331 @@
+script=nil
+-- V#X HXA-Crypt
+local rounds = 12
+local Encoding,Decoding,Hex,HXA
+HXA = {
+	Enc = function(str,key,verbose,blockSizeX)
+			if verbose then print("Encrypting String:\n		",str,"\n	Key:\n		",key) end
+			local str1,key1,blockSizeX = "","",blockSizeX or 32
+		    for i=1,#str do
+		    	str1 = str1..Encoding[str:sub(i,i)] or str1.."?"
+			end
+			for i=1,#key do
+				key1 = key1..Encoding[key:sub(i,i)] or key1.."?"
+			end
+			str,key,str1,key1=str1.."00100000010001100001000",key1
+			if verbose then print("Stage 1 (Raw Encode Bin) Data:\n		",str,"\n	Key:\n		",key)end
+			local strmod,block64 = #str%4,64*blockSizeX
+			str = strmod==0 and str or str..string.rep("0",4-strmod)
+			if #key<block64 then
+				local i,ks=1
+				repeat
+					ks = key:sub(((i*4)%#key)+1,#key)
+					key=key..ks
+					i=i+1
+				until #key>=block64
+			end
+			key1=#key%blockSizeX
+			key=key1==0 and key or key..string.rep('0',blockSizeX-key1)
+			if verbose then print("Stage 2 (Length Modulation Bin) Data:\n\t\t",str,"\n	Key:\t",key) end
+			key1={}
+			for i=1,blockSizeX^2 do
+				table.insert(key1,'0')
+			end
+			local row=0
+			for i3=1,rounds do
+				row=(row%blockSizeX)+1
+				for i=1,#key,blockSizeX do
+					local ksub,n,k=key:sub(i,i+blockSizeX-1),(row)*blockSizeX
+					for i2=1,#ksub do
+						k=n-blockSizeX+i2
+						key1[k]=key1[k]==ksub:sub(i2,i2) and '0' or '1'
+					end
+					row=(row%blockSizeX)+1
+				end
+			end
+			
+			key,key1=table.concat(key1,'')
+			if verbose then print("Stage 2.25 (KeyStream Generation) Key:\n\t",key) end
+			key=#key>=#str and key or string.rep(key,math.ceil(#str/#key))
+			str1 = ""
+			for i=1,#str do
+				str1 = str:sub(i,i)==key:sub(i,i) and str1.."0" or str1.."1"
+			end
+			str,str1,key1 = str1,"","",""
+			if verbose then print("Stage 2.5 (XOR) Data:\n	",str)end
+			for i=1,#str/4 do
+				str1,str=str1..Hex.To[str:sub(1,4)],str:sub(5)
+			end
+			for i=1,#key/4 do
+				key1,key=key1..Hex.To[key:sub(1,4)],key:sub(5)
+			end
+			str,key,str1,key1=str1,key1,""
+			if verbose then print("Stage 3 (Hexadecimal) Data:\n		",str,"\n	Key:\n		",key)end
+
+			for i=1,#str do
+				local ind=((Hex.Enum[str:sub(i,i)]+Hex.Enum[key:sub(i,i)])%16)
+				if ind==0 then ind=16 end
+				str1 = str1..Hex.Raw[ind]
+			end
+			str,str1 = str1,""
+			if verbose then print("Stage 4 (Addition 1) Data:\n		",str)end
+			str1,key1,key=math.random(),math.random(),math.random()
+			str1,key1,key=nil,nil,nil
+			return str
+	end,
+	Dec = function(str,key,verbose,blockSizeX)
+		if not str or not key then return -1 elseif verbose then print("Decrypting\nData:\t",str,'\nKey:',key) end
+		local key1,blockSizeX = "",blockSizeX or 32
+		for i=1,#key do
+			key1 = key1..Encoding[key:sub(i,i)] or key1.."?"
+		end
+		if verbose then print("Stage 1 (Huffman Bin) Key:\t",key1)end
+		key,key1=key1
+		local block64 = 64*blockSizeX
+		if #key<block64 then
+			local i,ks=1
+			repeat
+				ks = key:sub(((i*4)%#key)+1,#key)
+				key=key..ks
+				i=i+1
+			until #key>=block64
+		end
+		key1=#key%blockSizeX
+		key=key1==0 and key or key..string.rep('0',blockSizeX-key1)
+		if verbose then print("Stage 2 (Length Modulation Bin) Data:\n\t\t",str,"\n	Key:\t",key) end
+		key1={}
+		for i=1,blockSizeX^2 do
+			table.insert(key1,'0')
+		end
+		local row=0
+		for i3=1,rounds do
+			row=(row%blockSizeX)+1
+			for i=1,#key,blockSizeX do
+				local ksub,n,k=key:sub(i,i+blockSizeX-1),(row)*blockSizeX
+				for i2=1,#ksub do
+					k=n-blockSizeX+i2
+					key1[k]=key1[k]==ksub:sub(i2,i2) and '0' or '1'
+				end
+				row=(row%blockSizeX)+1
+			end
+		end
+		
+		key,key1=table.concat(key1,''),''
+		if verbose then print("Stage 2.25 (KeyStream Generation) Key:\n\t",key) end
+		key=#key>=#str and key or string.rep(key,math.ceil(#str/#key))
+		for i=1,#key/4 do
+			key1,key=key1..Hex.To[key:sub(1,4)],key:sub(5)
+		end
+		key,key1=key1,""
+		if verbose then print("Stage 3 (Hexadecimal) Data:\t",str,"\nKey:\t",key)end
+		str1 = ""
+		for i=1,#str do
+			local ind=((Hex.Enum[str:sub(i,i)]-Hex.Enum[key:sub(i,i)])%16)
+			if ind==0 then ind=16 elseif ind<0 then ind = 16-ind end
+			str1 = str1..(Hex.Raw[ind])
+		end
+		str,str1=str1,""
+		if verbose then print("Stage 4 (Subraction) Data:\t",str) end
+		
+		
+		for i=1,#str do
+			str1=str1..Hex.From[str:sub(i,i)]
+		end
+		str,str1=str1,""
+		for i=1,#key do
+			key1=key1..Hex.From[key:sub(i,i)]
+		end
+		key,str1,key1=key1,''
+		if verbose then print("Stage 5 (Binary) Data:\t",str,"\nKey:\t",key) end
+		for i=1,#str do
+			str1=str:sub(i,i)==key:sub(i,i) and str1..'0' or str1..'1'
+		end
+		str,str1=str1,''
+		if verbose then print("Stage 6 (Bin XOR) Data:\t",str) end
+		local index = Decoding
+		for i=1,#str do
+			local ssub = str:sub(i,i)
+			if ssub=="" then break end
+			pcall(function()
+			index=index[ssub]
+			if pcall(function()str1=str1..index end) then
+				index = Decoding
+			end
+			end)
+		end
+		str,str1=str1,""
+		if verbose then print("Stage 7 (Huffman Lookup) Data:\t",str) end
+
+		for i=#str,1,-1 do
+			str1 = str:sub(i)
+			if str1:match('^%.eot%.') then
+				str = str:sub(1,i-1)
+				break
+			end
+		end
+		return str
+	end,
+	Info = function() print([[
+HXA: Huffman XOR Addition
+Version: 2.1
+Publisher: Stalight Inc.
+Creator: V#X (Starlight)
+Info:
+	HXA is a stream encryption algorithm for 
+	general, non-commercial use. It uses a 
+	variable pseudo-bit-length keystream th-
+	at defaults to 32^2, 1024. A string mes-
+	sage and a string key are compressed an-
+	d encoded, XOR'd, and added as hexadeci-
+	mal bytes to produce a string ciphertex-
+	t. The key is expanded and acts as the 
+	basis for the pseudo-bit stream cipher. 
+	
+	The speed of encrypting and decrypting 
+	a string with the following command in 
+	ROBLOX Studio:
+	
+	
+	local checkTime=function()
+		local x,t,c=require(game.ServerScriptService.MainModule),
+			tick()
+		c = x.Enc('Hello world!','mykey',false,16);
+		print(c,'\n',x.Dec(c,'mykey',false,16),'\n',tick()-t)
+	end; 
+	checkTime()
+	
+	
+	is 0.0178 seconds, as shown in the output below:
+	
+	
+	> local checkTime=function()
+		local x,t,c=require(game.ServerScriptService.MainModule),
+			tick()
+		c = x.Enc('Hello world!','mykey',false,16);
+		print(c,'\n',x.Dec(c,'mykey',false,16),'\n',tick()-t)
+	end; 
+	checkTime()
+	AAB5274E7B4B1CCF05B22B91 
+ 	Hello world! 
+ 	0.017818689346313
+	
+	That is only with 10 rounds through the 
+	keyblock. If the setting is upped to 1-
+	5, then the output is as follows:
+	
+	
+	> local checkTime=function()
+		local x,t,c=require(game.ServerScriptService.MainModule),
+			tick()
+		c = x.Enc('Hello world!','mykey',false,16);
+		print(c,'\n',x.Dec(c,'mykey',false,16),'\n',tick()-t)
+	end; 
+	checkTime()
+	663527C25FC3F4CF0B522B7F 
+	Hello world! 
+	0.022075653076172
+	
+	
+	with the total time being 0.02208 seco-
+	nds. Rounds would have to be synchroni-
+	zed somehow in order to have a variabl-
+	e setting at this point without config-
+	uing external manipulators hereof. It 
+	is best to add support for more embedd-
+	ed markers like '.eot.' For now, 12 se-
+	ems stable, at 0.017 seconds. 13 rounds
+	takes 0.02062 seconds, which is signif-
+	icantly slower, in the grand scheme.
+	
+Algorithm:
+	1)Take two strings, a message and a key, 
+	and run through each character as they'-
+	re encoded to binary using a Huffman en-
+	coding table.
+
+	2)Tag the original length to the end as 
+	'.eot.' (encoded), then fix the size of 
+	the message to a multiple of 4. Expand 
+	key to int keySize^2 bytes by string.s-
+	ub(), with 'i' equal to the round modu-
+	lus the original key length, plus one, 
+	added continuously to the new keystrea-
+	m until such a value is reached.
+
+	3)Exclusive Or (XOR) the message using t-
+	he expanded binary key.
+
+	4)Convert both strings to hex ('0000'='0-
+	'...'1111'='F') then Add their indices t-
+	ogether and modulo 16. If the result is 
+	0, change it to 16, since Lua tables don-
+	't start at 0. A+3=E (A (10) + 3 (4) = E 
+	(14)).
+
+	5)Return encrypted message.
+	
+Usage:
+	string Enc(string Nessage, string key, b-
+	ool Verbose, int keySize)
+		Message		
+					Plaintext to be encrypte-
+					d.
+		Key			
+					Key to decrypting the Ci-
+					phertext.
+		Verbose		
+					Display more info as mod-
+					ule runs.
+		keySize		
+					Set the square of keysiz-
+					e as keystream length. D-
+					efault 32 (1024)
+	string Dec(string Ciphertext, string Key-
+				,bool Verbose)
+		Ciphertext	
+					Encrypted string
+		Key			
+					Key to decoding encrypte-
+					d string.
+		Verbose		
+					Display more info as mod-
+					ule runs.
+	void Info()
+		Displays this message.
+Changelog:
+	1	
+		First functional module published.
+	1.1	
+		For efficiency, a tag was moved and a-
+		djusted to enoode and decode more eas-
+		ily.
+	1.2	
+		Encryption agorithm expanded for furt-
+		her key integration.
+	1.3 
+		Disabled new key algorithms; far too 
+		slow. Recursive Addition removed.
+	2.0
+		256 pseudo-bit keystream added. Speed
+		clocked at 0.0159 seconds to encrypt 
+		and decrypt string 'Hello world!' wit-
+		h key 'mykey' without verbosity, and 
+		before syntax cleanup.
+	2.1 
+		Added argument 'keySize'. See usage f- 
+		or details. Defaults to 32, which is 
+		squared to get s keystream of 1024 ps-
+		eudo-bits in length.
+	]])end
+}
+local pipe = {function(...)return HXA.Enc(...)end,
+			  function(...)return HXA.Dec(...)end,
+			  function()HXA.Info()return 1 end,
+			 }
+local HXA_Clone=
+{
+	Enc = pipe[1],
+	Dec = pipe[2],
+	Info = pipe[3]
+}
+return HXA_Clone
